@@ -64,3 +64,12 @@ type Market struct {
 type MarketsResponse struct {
 	Markets []Market `json:"markets"`
 }
+
+type BalanceResponse struct {
+	Data Balance
+}
+
+type Balance struct {
+	BalanceDollars string `json:"balance_dollars"`
+	BalanceData float64 `json:"balance"`
+}
