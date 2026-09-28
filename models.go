@@ -70,6 +70,49 @@ type BalanceResponse struct {
 }
 
 type Balance struct {
-	BalanceDollars string `json:"balance_dollars"`
-	BalanceData float64 `json:"balance"`
+	BalanceDollars string  `json:"balance_dollars"`
+	BalanceData    float64 `json:"balance"`
+}
+
+type SubscribeMsg struct {
+	ID     int    `json:"id"`
+	Cmd    string `json:"cmd"`
+	Params Params `json:"params"`
+}
+
+type Params struct {
+	Channels []string `json:"channels"`
+	Tickers  []string `json:"market_tickers,omitempty"`
+}
+
+type TickerMessage struct {
+	Type string     `json:"type"`
+	SID  int        `json:"sid"`
+	Msg  TickerData `json:"msg"`
+}
+
+type TickerData struct {
+	MarketID     string `json:"market_id"`
+	MarketTicker string `json:"market_ticker"`
+
+	// Prices (sent as strings)
+	Price  float64 `json:"price_dollars,string"`
+	YesBid float64 `json:"yes_bid_dollars,string"`
+	YesAsk float64 `json:"yes_ask_dollars,string"`
+
+	// Sizes / volume (sent as strings)
+	YesBidSize    float64 `json:"yes_bid_size_fp,string"`
+	YesAskSize    float64 `json:"yes_ask_size_fp,string"`
+	LastTradeSize float64 `json:"last_trade_size_fp,string"`
+	Volume        float64 `json:"volume_fp,string"`
+	OpenInterest  float64 `json:"open_interest_fp,string"`
+
+	// Sent as real JSON numbers, so no ,string tag
+	DollarVolume       float64 `json:"dollar_volume"`
+	DollarOpenInterest float64 `json:"dollar_open_interest"`
+
+	// Timing
+	Time  time.Time `json:"time"`
+	TS    int64     `json:"ts"`    // unix seconds
+	TSMs  int64     `json:"ts_ms"` // unix milliseconds
 }
