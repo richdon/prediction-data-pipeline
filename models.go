@@ -1,6 +1,9 @@
 package main
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Series struct {
 	NycWeather string
@@ -85,12 +88,6 @@ type Params struct {
 	Tickers  []string `json:"market_tickers,omitempty"`
 }
 
-type TickerMessage struct {
-	Type string     `json:"type"`
-	SID  int        `json:"sid"`
-	Msg  TickerData `json:"msg"`
-}
-
 type TickerData struct {
 	MarketID     string `json:"market_id"`
 	MarketTicker string `json:"market_ticker"`
@@ -112,7 +109,55 @@ type TickerData struct {
 	DollarOpenInterest float64 `json:"dollar_open_interest"`
 
 	// Timing
-	Time  time.Time `json:"time"`
-	TS    int64     `json:"ts"`    // unix seconds
-	TSMs  int64     `json:"ts_ms"` // unix milliseconds
+	Time time.Time `json:"time"`
+	TS   int64     `json:"ts"`    // unix seconds
+	TSMs int64     `json:"ts_ms"` // unix milliseconds
 }
+
+type Envelope struct {
+	Type string          `json:"type"`
+	SID  int             `json:"sid"`
+	Msg  json.RawMessage `json:"msg"`
+}
+
+type EventChannels struct {
+	Tickers chan TickerData
+}
+
+type Config struct {
+	Env        string
+	ApiKeyID   string
+	PrivateKeyPath string
+	BaseUrlRest string
+	BaseUrlWs string
+	PathRest string
+	PathWs string
+}
+
+// s := Series{NycWeather: "KXHIGHNY"}
+
+// weatherSeriesUrls := SeriesUrls{
+// 	SeriesInfo:  fmt.Sprintf("https://external-api.kalshi.com/trade-api/v2/series/%s", s.NycWeather),
+// 	OpenMarkets: fmt.Sprintf("https://external-api.kalshi.com/trade-api/v2/markets?series_ticker=%s&status=open", s.NycWeather),
+// }
+
+// weatherSeriesInfo, err := seriesInfoData(weatherSeriesUrls.SeriesInfo)
+// if err != nil {
+// 	log.Panicln(err)
+// }
+// log.Printf("series: %s\ninfo:%v\n", s, weatherSeriesInfo)
+// weatherMarketInfo, err := marketsData(weatherSeriesUrls.OpenMarkets)
+// if err != nil {
+// 	log.Panicln(err)
+// }
+
+// for _, market := range weatherMarketInfo {
+// 	fmt.Fprintf(os.Stdout, "Title: %s, Ticker: %s\n", market.Title, market.Ticker)
+// }
+// b := doFetchAuthenticated("/markets")
+// //bal := Balance{}
+// var m MarketsResponse
+// json.Unmarshal(b, &m)
+// //fmt.Fprintf(os.Stdout, "balance data: %s\n", bal.BalanceDollars)
+// d, _ := json.MarshalIndent(m, "", "  ")
+// fmt.Fprintf(os.Stdout, "the data: %s", d)
