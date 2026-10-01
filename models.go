@@ -36,28 +36,26 @@ type Market struct {
 	Ticker      string `json:"ticker"`
 	EventTicker string `json:"event_ticker"`
 	Title       string `json:"title"`
-	Status      string `json:"status"` // "active", "closed", etc.
+	SubTitle    string `json:"subtitle"` // "$83,400 or above"
+	Status      string `json:"status"`
 
-	// Strike / contract definition
-	StrikeType  string  `json:"strike_type"` // "between", "greater", etc.
-	FloorStrike float64 `json:"floor_strike"`
-	CapStrike   float64 `json:"cap_strike"`
+	// Strike definition
+	StrikeType  string   `json:"strike_type"` // "greater", "between", ...
+	FloorStrike float64  `json:"floor_strike"`
+	CapStrike   *float64 `json:"cap_strike,omitempty"` // nil for "greater"
 
-	// Pricing (yes side)
-	YesBid float64 `json:"yes_bid_dollars,string"`
-	YesAsk float64 `json:"yes_ask_dollars,string"`
-
-	// Pricing (no side)
-	NoBid float64 `json:"no_bid_dollars,string"`
-	NoAsk float64 `json:"no_ask_dollars,string"`
+	// Top of book
+	YesBid     float64 `json:"yes_bid_dollars,string"`
+	YesAsk     float64 `json:"yes_ask_dollars,string"`
+	YesBidSize float64 `json:"yes_bid_size_fp,string"`
+	YesAskSize float64 `json:"yes_ask_size_fp,string"`
 
 	LastPrice float64 `json:"last_price_dollars,string"`
 
-	// Activity / liquidity
-	Volume24h    float64 `json:"volume_24h_fp,string"`
+	// Activity
 	Volume       float64 `json:"volume_fp,string"`
+	Volume24h    float64 `json:"volume_24h_fp,string"`
 	OpenInterest float64 `json:"open_interest_fp,string"`
-	Liquidity    float64 `json:"liquidity_dollars,string"`
 
 	// Timing
 	OpenTime  time.Time `json:"open_time"`
@@ -120,6 +118,41 @@ type Envelope struct {
 	Msg  json.RawMessage `json:"msg"`
 }
 
+
+type EventsResponse struct {
+	Cursor string  `json:"cursor"`
+	Events []Event `json:"events"`
+}
+
+type Event struct {
+	EventTicker  string `json:"event_ticker"`
+	SeriesTicker string `json:"series_ticker"`
+	Title        string `json:"title"`     // "BTC price on Sep 29, 2026 at 11pm EDT?"
+	SubTitle     string `json:"sub_title"` // "On Sep 29, 2026 at 11pm EDT"
+
+	// Which window this event is — "hourly", "daily", "weekly".
+	// The only reliable way to tell them apart; the ticker won't.
+	ProductMetadata ProductMetadata `json:"product_metadata"`
+
+	// false means the strikes are a cumulative "or above" ladder,
+	// not exclusive buckets.
+	MutuallyExclusive bool `json:"mutually_exclusive"`
+
+	StrikeDate        time.Time          `json:"strike_date"`
+	SettlementSources []SettlementSource `json:"settlement_sources"`
+
+	Markets []Market `json:"markets"` // populated by with_nested_markets=true
+}
+
+type ProductMetadata struct {
+	Cadence string `json:"cadence"`
+}
+
+type SettlementSource struct {
+	Name string `json:"name"` // "CF Benchmarks"
+	URL  string `json:"url"`
+}
+
 type EventChannels struct {
 	Tickers chan TickerData
 }
@@ -134,30 +167,3 @@ type Config struct {
 	PathWs string
 }
 
-// s := Series{NycWeather: "KXHIGHNY"}
-
-// weatherSeriesUrls := SeriesUrls{
-// 	SeriesInfo:  fmt.Sprintf("https://external-api.kalshi.com/trade-api/v2/series/%s", s.NycWeather),
-// 	OpenMarkets: fmt.Sprintf("https://external-api.kalshi.com/trade-api/v2/markets?series_ticker=%s&status=open", s.NycWeather),
-// }
-
-// weatherSeriesInfo, err := seriesInfoData(weatherSeriesUrls.SeriesInfo)
-// if err != nil {
-// 	log.Panicln(err)
-// }
-// log.Printf("series: %s\ninfo:%v\n", s, weatherSeriesInfo)
-// weatherMarketInfo, err := marketsData(weatherSeriesUrls.OpenMarkets)
-// if err != nil {
-// 	log.Panicln(err)
-// }
-
-// for _, market := range weatherMarketInfo {
-// 	fmt.Fprintf(os.Stdout, "Title: %s, Ticker: %s\n", market.Title, market.Ticker)
-// }
-// b := doFetchAuthenticated("/markets")
-// //bal := Balance{}
-// var m MarketsResponse
-// json.Unmarshal(b, &m)
-// //fmt.Fprintf(os.Stdout, "balance data: %s\n", bal.BalanceDollars)
-// d, _ := json.MarshalIndent(m, "", "  ")
-// fmt.Fprintf(os.Stdout, "the data: %s", d)

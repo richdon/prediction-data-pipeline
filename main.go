@@ -13,12 +13,17 @@ import (
 )
 
 func main() {
-	endpoint := os.Args[1]
-	c := loadConfig()
-	authHeaders := buildAuthHeaders(c.PrivateKeyPath, c.ApiKeyID, "GET", c.PathWs, endpoint)
+	cfg := loadConfig()
+
+	tickers, err := marketTickers(cfg, "KXBTCD", "hourly")
+	if err != nil {
+		log.Panicln(err)
+	}
+
+	authHeaders := buildAuthHeaders(cfg.PrivateKeyPath, cfg.ApiKeyID, "GET", cfg.PathWs, "")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	conn, err := connWebSocket("GET", c.BaseUrlWs+c.PathWs, authHeaders)
+	conn, err := connWebSocket("GET", cfg.BaseUrlWs+cfg.PathWs, authHeaders)
 
 	if err != nil {
 		log.Panicln(err)
@@ -28,7 +33,7 @@ func main() {
 		<-ctx.Done()
 		conn.Close()
 	}()
-	if err := subscribe(conn, []string{"ticker"}, []string{}); err != nil {
+	if err := subscribe(conn, []string{"ticker"}, tickers); err != nil {
 		log.Panicln(err)
 	}
 	ec := EventChannels{Tickers: make(chan TickerData, 1024)}
@@ -38,6 +43,23 @@ func main() {
 	for t := range ec.Tickers {
 		fmt.Printf("%s bid=%.2f ask=%.2f\n", t.MarketTicker, t.YesBid, t.YesAsk)
 	}
+}
+
+func marketTickers(cfg Config, seriesTicker, cadence string) (tickers []string,err error){
+	events, err := openEvents(cfg, seriesTicker)
+	if err != nil {
+		return []string{}, err
+	}
+	for _, event := range events{
+		if event.ProductMetadata.Cadence == cadence {
+			selectedEvent := event
+			for _, market := range selectedEvent.Markets {
+				tickers = append(tickers, market.Ticker)
+			}
+			return
+		}
+	}
+	return tickers, fmt.Errorf("selected cadence: %s did match any in series", cadence)
 }
 
 func loadConfig() Config {
