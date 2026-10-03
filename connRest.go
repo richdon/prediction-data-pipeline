@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"log"
 )
 
 func fetch(method, url string, h http.Header) (b json.RawMessage, err error){
@@ -25,14 +24,14 @@ func fetch(method, url string, h http.Header) (b json.RawMessage, err error){
 	return json.RawMessage(b), nil
 }
 
-func openEvents(cfg Config, seriesTicker string) (events []Event, err error) {
+func openEvents(cfg Config) (events []Event, err error) {
 	u, err := url.Parse(cfg.BaseUrlRest + cfg.PathRest + "/events")
     if err != nil {
         return 
     }
 	h := buildAuthHeaders(cfg.PrivateKeyPath, cfg.ApiKeyID, "GET", cfg.PathRest, "/events")
 	q := u.Query()
-    q.Set("series_ticker", seriesTicker)
+    q.Set("series_ticker", cfg.Series)
     q.Set("status", "open")
     q.Set("with_nested_markets", "true")
     u.RawQuery = q.Encode()
@@ -41,8 +40,8 @@ func openEvents(cfg Config, seriesTicker string) (events []Event, err error) {
 		return
 	}
 	var data EventsResponse
-	if err := json.Unmarshal(r, &data); err != nil {
-		log.Printf("decode failed, body was: %s", r[:500])
+	if err = json.Unmarshal(r, &data); err != nil {
+		return nil, fmt.Errorf("decode events: %w, body was: %s", err, r[:min(len(r), 500)])
 	}
 	return data.Events, nil
 }

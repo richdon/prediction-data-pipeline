@@ -5,33 +5,6 @@ import (
 	"time"
 )
 
-type Series struct {
-	NycWeather string
-}
-
-type SeriesUrls struct {
-	SeriesInfo  string
-	OpenMarkets string
-}
-
-type EventUrls struct {
-	Events    string
-	Orderbook string
-}
-
-type SeriesInfoResponse struct {
-	Series SeriesInfo `json:"series"`
-}
-type SeriesInfo struct {
-	Category      string `json:"category"`
-	FeeMultiplier int    `json:"fee_multiplier"`
-	FeeType       string `json:"Quadratic"`
-	Frequnecy     string `json:"daily"`
-	Ticker        string `json:"ticker"`
-	Title         string `json:"title"`
-	LastUpdated   string `json:"last_updated_ts"`
-}
-
 type Market struct {
 	Ticker      string `json:"ticker"`
 	EventTicker string `json:"event_ticker"`
@@ -62,20 +35,7 @@ type Market struct {
 	CloseTime time.Time `json:"close_time"`
 }
 
-type MarketsResponse struct {
-	Markets []Market `json:"markets"`
-}
-
-type BalanceResponse struct {
-	Data Balance
-}
-
-type Balance struct {
-	BalanceDollars string  `json:"balance_dollars"`
-	BalanceData    float64 `json:"balance"`
-}
-
-type SubscribeMsg struct {
+type Message struct {
 	ID     int    `json:"id"`
 	Cmd    string `json:"cmd"`
 	Params Params `json:"params"`
@@ -118,7 +78,6 @@ type Envelope struct {
 	Msg  json.RawMessage `json:"msg"`
 }
 
-
 type EventsResponse struct {
 	Cursor string  `json:"cursor"`
 	Events []Event `json:"events"`
@@ -158,12 +117,31 @@ type EventChannels struct {
 }
 
 type Config struct {
-	Env        string
-	ApiKeyID   string
+	Env            string
+	ApiKeyID       string
 	PrivateKeyPath string
-	BaseUrlRest string
-	BaseUrlWs string
-	PathRest string
-	PathWs string
+	BaseUrlRest    string
+	BaseUrlWs      string
+	PathRest       string
+	PathWs         string
+	Series         string
+	Cadence        string
 }
 
+// The ack carries the sid inside msg, unlike data messages where it is top-level.
+type SubscribedMsg struct {
+	Channel string `json:"channel"`
+	SID     int    `json:"sid"`
+}
+
+type UpdateSubMsg struct {
+	ID     int          `json:"id"`
+	Cmd    string       `json:"cmd"`
+	Params UpdateParams `json:"params"`
+}
+
+type UpdateParams struct {
+	SIDs    []int    `json:"sids"`
+	Tickers []string `json:"market_tickers"`
+	Action  string   `json:"action"` // "add_markets" | "delete_markets"
+}
