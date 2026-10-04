@@ -8,6 +8,8 @@ import (
 	"net/url"
 )
 
+// fetch sends a request with headers h and returns the response body.
+// It returns an error for any status other than 200 OK.
 func fetch(method, url string, h http.Header) (b json.RawMessage, err error){
 	req, _ := http.NewRequest(method, url, nil)
 	req.Header = h
@@ -24,6 +26,8 @@ func fetch(method, url string, h http.Header) (b json.RawMessage, err error){
 	return json.RawMessage(b), nil
 }
 
+// openEvents returns the open events for cfg.Series, with their markets
+// nested in each event.
 func openEvents(cfg Config) (events []Event, err error) {
 	u, err := url.Parse(cfg.BaseUrlRest + cfg.PathRest + "/events")
     if err != nil {

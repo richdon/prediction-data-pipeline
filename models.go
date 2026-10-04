@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// Market is one strike within an event, as returned by the REST API.
 type Market struct {
 	Ticker      string `json:"ticker"`
 	EventTicker string `json:"event_ticker"`
@@ -35,17 +36,23 @@ type Market struct {
 	CloseTime time.Time `json:"close_time"`
 }
 
+// Message is a WebSocket subscribe command.
 type Message struct {
 	ID     int    `json:"id"`
 	Cmd    string `json:"cmd"`
 	Params Params `json:"params"`
 }
 
+// Params holds the channels and market tickers for a subscribe command.
 type Params struct {
 	Channels []string `json:"channels"`
 	Tickers  []string `json:"market_tickers,omitempty"`
 }
 
+
+
+// TickerData is the payload of a "ticker" message: top-of-book quotes, sizes
+// and activity for one market.
 type TickerData struct {
 	MarketID     string `json:"market_id"`
 	MarketTicker string `json:"market_ticker"`
@@ -72,17 +79,22 @@ type TickerData struct {
 	TSMs int64     `json:"ts_ms"` // unix milliseconds
 }
 
+// Envelope is the outer shape of every WebSocket message. Msg is decoded
+// separately once Type is known.
 type Envelope struct {
 	Type string          `json:"type"`
 	SID  int             `json:"sid"`
 	Msg  json.RawMessage `json:"msg"`
 }
 
+// EventsResponse is the body of GET /events.
 type EventsResponse struct {
 	Cursor string  `json:"cursor"`
 	Events []Event `json:"events"`
 }
 
+// Event is one betting window in a series, with a single deadline shared by
+// all of its markets.
 type Event struct {
 	EventTicker  string `json:"event_ticker"`
 	SeriesTicker string `json:"series_ticker"`
@@ -103,19 +115,26 @@ type Event struct {
 	Markets []Market `json:"markets"` // populated by with_nested_markets=true
 }
 
+// ProductMetadata holds an event's cadence.
 type ProductMetadata struct {
 	Cadence string `json:"cadence"`
 }
 
+// SettlementSource names the reference an event settles against.
 type SettlementSource struct {
 	Name string `json:"name"` // "CF Benchmarks"
 	URL  string `json:"url"`
 }
 
+// EventChannels carries decoded WebSocket data from ReadMessage to its
+// consumers.
 type EventChannels struct {
+
 	Tickers chan TickerData
 }
 
+// Config holds the connection settings loaded from the environment and the
+// series and cadence to track.
 type Config struct {
 	Env            string
 	ApiKeyID       string
@@ -128,18 +147,22 @@ type Config struct {
 	Cadence        string
 }
 
-// The ack carries the sid inside msg, unlike data messages where it is top-level.
+// SubscribedMsg is the payload of a "subscribed" ack. The ack carries the sid
+// inside msg, unlike data messages where it is top-level.
 type SubscribedMsg struct {
 	Channel string `json:"channel"`
 	SID     int    `json:"sid"`
 }
 
+// UpdateSubMsg is an update_subscription command.
 type UpdateSubMsg struct {
 	ID     int          `json:"id"`
 	Cmd    string       `json:"cmd"`
 	Params UpdateParams `json:"params"`
 }
 
+// UpdateParams holds the sids, market tickers and action for an
+// update_subscription command.
 type UpdateParams struct {
 	SIDs    []int    `json:"sids"`
 	Tickers []string `json:"market_tickers"`

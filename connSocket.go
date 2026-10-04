@@ -9,6 +9,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// SubscriptionManager owns the Kalshi WebSocket connection and the client's view
+// of its subscriptions. All writes go through Send, and mu guards nextID, sids
+// and current.
 type SubscriptionManager struct {
 	conn    *websocket.Conn
 	mu      sync.Mutex
@@ -17,12 +20,16 @@ type SubscriptionManager struct {
 	current map[string]bool // tickers we believe we're subscribed to
 }
 
+// Send writes v to the connection as JSON. It holds s.mu so that writes from
+// different goroutines can't interleave on the socket.
 func (s *SubscriptionManager) Send(v any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.conn.WriteJSON(v)
 }
 
+// NextCmdID returns a new command id. Kalshi echoes it on the response to
+// that command.
 func (s *SubscriptionManager) NextCmdID() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -30,6 +37,8 @@ func (s *SubscriptionManager) NextCmdID() int {
 	return s.nextID
 }
 
+// SubscribeMessage sends a subscribe command for tickers on each of channels.
+// The sid arrives later in a "subscribed" ack, handled by ReadMessage.
 func (s *SubscriptionManager) SubscribeMessage(channels, tickers []string) error {
 	msg := Message{
 		ID:  s.NextCmdID(),
@@ -42,6 +51,9 @@ func (s *SubscriptionManager) SubscribeMessage(channels, tickers []string) error
 	return s.Send(msg)
 }
 
+// UpdateMessage sends an update_subscription command that applies action
+// ("add_markets" or "delete_markets") to tickers on subscription sid.
+// It sends nothing if tickers is empty.
 func (s *SubscriptionManager) UpdateMessage(sid int, tickers []string, action string) error {
 	if len(tickers) == 0 {
 		return nil // nothing to do
@@ -57,6 +69,7 @@ func (s *SubscriptionManager) UpdateMessage(sid int, tickers []string, action st
 	})
 }
 
+// RecordSID stores the sid the server assigned to channel.
 func (s *SubscriptionManager) RecordSID(sid int, channel string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -130,6 +143,10 @@ func (s *SubscriptionManager) Reconcile(tickers []string) error {
 	return nil
 }
 
+// ReadMessage reads from the connection until it errors or ctx is done,
+// forwarding ticker data to ec.Tickers and recording sids from subscribe acks.
+// It closes ec.Tickers on return. Closing the connection is what unblocks it
+// on shutdown.
 func (s *SubscriptionManager) ReadMessage(ctx context.Context, ec EventChannels) {
 	defer close(ec.Tickers)
 	for {
@@ -181,15 +198,14 @@ func (s *SubscriptionManager) ReadMessage(ctx context.Context, ec EventChannels)
 	}
 }
 
+// buildSubscriptionManager opens an authenticated WebSocket connection to
+// Kalshi and returns a SubscriptionManager for it with no subscriptions yet.
 func buildSubscriptionManager(cfg Config) (sm *SubscriptionManager, err error) {
 	authHeaders := buildAuthHeaders(cfg.PrivateKeyPath, cfg.ApiKeyID, "GET", cfg.PathWs, "")
 	url := cfg.BaseUrlWs+cfg.PathWs
 	conn, _, err := websocket.DefaultDialer.Dial(url, authHeaders)
 	if err != nil {
 		return nil, err
-	}
-	if err != nil {
-		return
 	}
 	sm = &SubscriptionManager{
 		conn:    conn,

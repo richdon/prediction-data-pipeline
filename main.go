@@ -38,6 +38,10 @@ func main() {
 	}
 }
 
+// discoveryLoop reconciles the ticker subscription with the current open
+// event straight away, then again 30 seconds after every hour, until ctx is
+// done. A failed discovery or reconcile is logged and the existing
+// subscription is kept until the next attempt.
 func discoveryLoop(ctx context.Context, cfg Config, sm *SubscriptionManager) {
 	for {
 		// on failure keep the existing subscription and retry next hour
@@ -59,6 +63,8 @@ func discoveryLoop(ctx context.Context, cfg Config, sm *SubscriptionManager) {
 }
 
 
+// marketTickers returns the market tickers of the first open event in
+// cfg.Series whose cadence matches cfg.Cadence.
 func marketTickers(cfg Config) (tickers []string, err error) {
 	events, err := openEvents(cfg)
 	if err != nil {
@@ -76,10 +82,14 @@ func marketTickers(cfg Config) (tickers []string, err error) {
 	return tickers, fmt.Errorf("selected cadence: %s did match any in series", cfg.Cadence)
 }
 
+// nextTopOfHour returns the start of the hour after t.
 func nextTopOfHour(t time.Time) time.Time {
 	return t.Truncate(time.Hour).Add(time.Hour)
 }
 
+// loadConfig builds a Config for series and cadence from .env, reading
+// variables prefixed with the value of ENV (for example PROD_API_KEY_ID).
+// It exits if .env cannot be loaded.
 func loadConfig(series, cadence string) Config {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file")

@@ -14,6 +14,9 @@ import (
 	"time"
 )
 
+// signRequest signs a Kalshi request with key and returns the base64 signature
+// and the millisecond timestamp it signed. The signed message is
+// timestamp + method + path, with any query string stripped from path.
 func signRequest(key ed25519.PrivateKey, method, path string) (string, string) {
 	ts := strconv.FormatInt(time.Now().UnixMilli(), 10)
 	path = strings.Split(path, "?")[0]
@@ -22,6 +25,9 @@ func signRequest(key ed25519.PrivateKey, method, path string) (string, string) {
 	return base64.StdEncoding.EncodeToString(sig), ts
 }
 
+// buildAuthHeaders returns the KALSHI-ACCESS-* headers for a request to
+// urlPath+endpoint. It loads the private key from keyPath on every call and
+// panics if the key cannot be loaded.
 func buildAuthHeaders(keyPath, apiKeyID, method,  urlPath, endpoint string) http.Header {
 	pk, err := loadPrivateKey(keyPath)
 	if err != nil {
@@ -35,6 +41,8 @@ func buildAuthHeaders(keyPath, apiKeyID, method,  urlPath, endpoint string) http
 	return headers
 }
 
+// loadPrivateKey reads a PEM-encoded PKCS#8 file at path and returns the
+// Ed25519 private key it contains.
 func loadPrivateKey(path string) (ed25519.PrivateKey, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
