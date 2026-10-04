@@ -15,26 +15,40 @@ import (
 
 func main() {
 	cfg := loadConfig("KXBTCD", "hourly")
-	sm, err := buildSubscriptionManager(cfg)
-	if err != nil {
-		log.Panicln(err)
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go discoveryLoop(ctx, cfg, sm)
-	// closing the conn is what unblocks ReadMessage on shutdown
-	go func() {
-		<-ctx.Done()
-		sm.conn.Close()
-	}()
+	for {
+		connCtx, cancel := context.WithCancel(ctx)
+		sm, err := buildSubscriptionManager(connCtx, cfg)
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		go discoveryLoop(connCtx, cfg, sm)
+		// closing the conn is what unblocks ReadMessage on shutdown
+		go func() {
+			<-connCtx.Done()
+			sm.conn.Close()
+		}()
 
-	ec := EventChannels{Tickers: make(chan TickerData, 1024)}
+		ec := EventChannels{Tickers: make(chan TickerData, 1024), Errors: make(chan ReadError)}
 
-	go sm.ReadMessage(ctx, ec)
-
-	for t := range ec.Tickers {
-		fmt.Printf("%s bid=%.2f ask=%.2f\n", t.MarketTicker, t.YesBid, t.YesAsk)
+		go sm.ReadMessage(connCtx, ec)
+	inner:
+		for {
+			select {
+			case err := <-ec.Errors:
+				log.Println("connection err: ", err)
+				cancel()
+				sm.conn.Close()
+				break inner
+			case t := <-ec.Tickers:
+				fmt.Printf("%s bid=%.2f ask=%.2f\n", t.MarketTicker, t.YesBid, t.YesAsk)
+			case <-connCtx.Done():
+				log.Println("connection closed, exiting...")
+				return
+			}
+		}
 	}
 }
 
@@ -45,12 +59,12 @@ func main() {
 func discoveryLoop(ctx context.Context, cfg Config, sm *SubscriptionManager) {
 	for {
 		// on failure keep the existing subscription and retry next hour
-		if tickers, err := marketTickers(cfg); err != nil {
+		if tickers, err := marketTickers(ctx, cfg); err != nil {
 			log.Println("discovery failed, keeping current subscription:", err)
 		} else if err := sm.Reconcile(tickers); err != nil {
 			log.Println("reconcile failed:", err)
 		}
-		wait := time.Until(nextTopOfHour(time.Now()).Add(30*time.Second))
+		wait := time.Until(nextTopOfHour(time.Now()).Add(30 * time.Second))
 		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
@@ -62,22 +76,25 @@ func discoveryLoop(ctx context.Context, cfg Config, sm *SubscriptionManager) {
 	}
 }
 
-
 // marketTickers returns the market tickers of the first open event in
 // cfg.Series whose cadence matches cfg.Cadence.
-func marketTickers(cfg Config) (tickers []string, err error) {
-	events, err := openEvents(cfg)
+func marketTickers(ctx context.Context, cfg Config) (tickers []string, err error) {
+	events, err := openEvents(ctx, cfg)
 	if err != nil {
 		return []string{}, err
 	}
 	for _, event := range events {
 		if event.ProductMetadata.Cadence == cfg.Cadence {
-			selectedEvent := event
-			for _, market := range selectedEvent.Markets {
-				tickers = append(tickers, market.Ticker)
+			for _, market := range event.Markets {
+				if market.Status == "active" {
+					tickers = append(tickers, market.Ticker)
+				}
 			}
-			return
 		}
+	}
+	if len(tickers) > 0 {
+		return tickers, nil
+
 	}
 	return tickers, fmt.Errorf("selected cadence: %s did match any in series", cfg.Cadence)
 }

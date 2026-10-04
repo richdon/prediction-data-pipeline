@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -140,6 +142,7 @@ func (s *SubscriptionManager) Reconcile(tickers []string) error {
 		return err
 	}
 	s.RemoveTickers(toRemove)
+	log.Printf("reconcile: want=%d +%d -%d", len(tickers), len(toAdd), len(toRemove))
 	return nil
 }
 
@@ -149,13 +152,19 @@ func (s *SubscriptionManager) Reconcile(tickers []string) error {
 // on shutdown.
 func (s *SubscriptionManager) ReadMessage(ctx context.Context, ec EventChannels) {
 	defer close(ec.Tickers)
+	defer close(ec.Errors)
 	for {
+		var e Envelope
 		_, msg, err := s.conn.ReadMessage()
 		if err != nil {
 			log.Println("read error:", err)
-			return
+			select {
+			case ec.Errors <- ReadError{err}:
+				return
+			case <-ctx.Done():
+				return
+			}
 		}
-		var e Envelope
 		if err := json.Unmarshal(msg, &e); err != nil {
 			log.Println("unmarshal envelope error:", err)
 			continue
@@ -200,18 +209,33 @@ func (s *SubscriptionManager) ReadMessage(ctx context.Context, ec EventChannels)
 
 // buildSubscriptionManager opens an authenticated WebSocket connection to
 // Kalshi and returns a SubscriptionManager for it with no subscriptions yet.
-func buildSubscriptionManager(cfg Config) (sm *SubscriptionManager, err error) {
-	authHeaders := buildAuthHeaders(cfg.PrivateKeyPath, cfg.ApiKeyID, "GET", cfg.PathWs, "")
-	url := cfg.BaseUrlWs+cfg.PathWs
-	conn, _, err := websocket.DefaultDialer.Dial(url, authHeaders)
-	if err != nil {
-		return nil, err
+func buildSubscriptionManager(ctx context.Context, cfg Config) (*SubscriptionManager, error) {
+	url := cfg.BaseUrlWs + cfg.PathWs
+
+	var conn *websocket.Conn
+	connect := func() error {
+		// re-sign per attempt: the timestamp goes stale between retries
+		h := buildAuthHeaders(cfg.PrivateKeyPath, cfg.ApiKeyID, "GET", cfg.PathWs, "")
+
+		c, resp, err := websocket.DefaultDialer.Dial(url, h)
+		if err != nil {
+			if resp != nil {
+				return fmt.Errorf("dial %s: %w (status %d)", url, err, resp.StatusCode)
+			}
+			return fmt.Errorf("dial %s: %w", url, err)
+		}
+		conn = c
+		return nil
 	}
-	sm = &SubscriptionManager{
+
+	if err := retry(ctx, 10, 2*time.Second, connect); err != nil {
+		return nil, fmt.Errorf("connecting websocket: %w", err)
+	}
+
+	return &SubscriptionManager{
 		conn:    conn,
 		nextID:  1,
 		sids:    make(map[string]int),
 		current: make(map[string]bool),
-	}
-	return
+	}, nil
 }

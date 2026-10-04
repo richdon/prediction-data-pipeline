@@ -49,8 +49,6 @@ type Params struct {
 	Tickers  []string `json:"market_tickers,omitempty"`
 }
 
-
-
 // TickerData is the payload of a "ticker" message: top-of-book quotes, sizes
 // and activity for one market.
 type TickerData struct {
@@ -129,8 +127,12 @@ type SettlementSource struct {
 // EventChannels carries decoded WebSocket data from ReadMessage to its
 // consumers.
 type EventChannels struct {
-
 	Tickers chan TickerData
+	Errors  chan ReadError
+}
+
+type ReadError struct {
+	Error         error
 }
 
 // Config holds the connection settings loaded from the environment and the
