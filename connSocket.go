@@ -152,7 +152,9 @@ func (s *SubscriptionManager) Reconcile(tickers []string) error {
 // on shutdown.
 func (s *SubscriptionManager) ReadMessage(ctx context.Context, ec EventChannels) {
 	defer close(ec.Tickers)
+	defer close(ec.Index)
 	defer close(ec.Errors)
+	lastSeq := make(map[int]int) // sid -> last seq seen, for gap detection
 	for {
 		var e Envelope
 		_, msg, err := s.conn.ReadMessage()
@@ -189,6 +191,36 @@ func (s *SubscriptionManager) ReadMessage(ctx context.Context, ec EventChannels)
 				continue
 			}
 			s.RecordSID(sm.SID, sm.Channel)
+		case "cfbenchmarks_value":
+			var cfbMsg CFBenchmarksMsg
+			if err := json.Unmarshal(e.Msg, &cfbMsg); err != nil {
+				log.Println("unmarshal error:", err)
+				continue
+			}
+			var cff CFFrame
+			if err := json.Unmarshal([]byte(cfbMsg.Data), &cff); err != nil {
+				log.Println("unmarshal error:", err)
+				continue
+			}
+			if last, ok := lastSeq[e.SID]; ok && e.Seq != last+1 {
+				log.Printf("%s: seq gap, expected %d got %d", cfbMsg.IndexID, last+1, e.Seq)
+			}
+			lastSeq[e.SID] = e.Seq
+			it := IndexTick{
+				IndexID:      cfbMsg.IndexID,
+				Value:        cff.Value,
+				SourceTsMs:   cff.Time,
+				ReceivedAtMs: cfbMsg.ReceivedAt,
+				Avg60s:       cfbMsg.Avg60s.Value,
+				Avg60sWindow: cfbMsg.Avg60s.WindowSize,
+				Seq:          e.Seq,
+			}
+			select {
+			case ec.Index <- it:
+				continue
+			case <-ctx.Done():
+				return
+			}
 		case "error":
 			// a rejected command means current may not match the server, so
 			// forget it and let the next reconcile re-add everything it wants

@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	cfg := loadConfig("KXBTCD", "hourly")
+	cfg := loadConfig("KXBTCD", "BRTI", "hourly")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	for {
@@ -31,7 +31,11 @@ func main() {
 			sm.conn.Close()
 		}()
 
-		ec := EventChannels{Tickers: make(chan TickerData, 1024), Errors: make(chan ReadError)}
+		ec := EventChannels{
+			Tickers: make(chan TickerData, 1024),
+			Index:   make(chan IndexTick, 256),
+			Errors:  make(chan ReadError),
+		}
 
 		go sm.ReadMessage(connCtx, ec)
 	inner:
@@ -44,6 +48,8 @@ func main() {
 				break inner
 			case t := <-ec.Tickers:
 				fmt.Printf("%s bid=%.2f ask=%.2f\n", t.MarketTicker, t.YesBid, t.YesAsk)
+			case it := <-ec.Index:
+				fmt.Printf("%s value=%.2f avg60s=%.2f (n=%d)\n", it.IndexID, it.Value, it.Avg60s, it.Avg60sWindow)
 			case <-connCtx.Done():
 				log.Println("connection closed, exiting...")
 				return
@@ -57,6 +63,14 @@ func main() {
 // done. A failed discovery or reconcile is logged and the existing
 // subscription is kept until the next attempt.
 func discoveryLoop(ctx context.Context, cfg Config, sm *SubscriptionManager) {
+	sm.Send(Message{
+		ID:  sm.NextCmdID(),
+		Cmd: "subscribe",
+		Params: Params{
+			Channels: []string{"cfbenchmarks_value"},
+			IndexIDs: []string{cfg.IndexID},
+		},
+	})
 	for {
 		// on failure keep the existing subscription and retry next hour
 		if tickers, err := marketTickers(ctx, cfg); err != nil {
@@ -107,7 +121,7 @@ func nextTopOfHour(t time.Time) time.Time {
 // loadConfig builds a Config for series and cadence from .env, reading
 // variables prefixed with the value of ENV (for example PROD_API_KEY_ID).
 // It exits if .env cannot be loaded.
-func loadConfig(series, cadence string) Config {
+func loadConfig(series, indexID, cadence string) Config {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file")
 	}
@@ -130,6 +144,7 @@ func loadConfig(series, cadence string) Config {
 		BaseUrlRest:    baseUrlRest,
 		PathRest:       pathRest,
 		Series:         series,
+		IndexID:        indexID,
 		Cadence:        cadence,
 	}
 }

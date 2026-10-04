@@ -47,6 +47,7 @@ type Message struct {
 type Params struct {
 	Channels []string `json:"channels"`
 	Tickers  []string `json:"market_tickers,omitempty"`
+	IndexIDs []string `json:"index_ids,omitempty"`
 }
 
 // TickerData is the payload of a "ticker" message: top-of-book quotes, sizes
@@ -82,6 +83,7 @@ type TickerData struct {
 type Envelope struct {
 	Type string          `json:"type"`
 	SID  int             `json:"sid"`
+	Seq  int             `json:"seq"` // per-subscription; a jump means missed messages
 	Msg  json.RawMessage `json:"msg"`
 }
 
@@ -128,11 +130,12 @@ type SettlementSource struct {
 // consumers.
 type EventChannels struct {
 	Tickers chan TickerData
+	Index   chan IndexTick
 	Errors  chan ReadError
 }
 
 type ReadError struct {
-	Error         error
+	Error error
 }
 
 // Config holds the connection settings loaded from the environment and the
@@ -146,6 +149,7 @@ type Config struct {
 	PathRest       string
 	PathWs         string
 	Series         string
+	IndexID        string
 	Cadence        string
 }
 
@@ -169,4 +173,37 @@ type UpdateParams struct {
 	SIDs    []int    `json:"sids"`
 	Tickers []string `json:"market_tickers"`
 	Action  string   `json:"action"` // "add_markets" | "delete_markets"
+}
+
+type CFBenchmarksMsg struct {
+	IndexID    string         `json:"index_id"`
+	ReceivedAt int64          `json:"received_at"` // unix ms
+	Data       string         `json:"data"`        // raw CF frame, decode into CFFrame
+	Avg60s     WindowedAvg    `json:"avg_60s_data"`
+	Avg15m     *WindowedAvg   `json:"last_60s_windowed_average_15min,omitempty"` // optional
+}
+
+type CFFrame struct {
+	ID    string  `json:"id"`
+	Time  int64   `json:"time"` // unix ms, CF's timestamp
+	Value float64 `json:"value,string"`
+}
+
+type WindowedAvg struct {
+	Value       float64 `json:"value,string"`
+	WindowSize  int     `json:"window_size"`
+	StartTsMs   int64   `json:"window_start_ts_ms"`
+	EndTsMsExcl int64   `json:"window_end_ts_exclusive"`
+}
+
+// IndexTick is one reference index update, flattened from a cfbenchmarks_value
+// message into the fields the model uses.
+type IndexTick struct {
+	IndexID      string  // e.g. "BRTI"
+	Value        float64 // index value, from the inner CF data frame
+	SourceTsMs   int64   // CF's timestamp: when the value was true (event time)
+	ReceivedAtMs int64   // when Kalshi received it: same clock as ticker data
+	Avg60s       float64 // trailing 60-second average; the settlement quantity in the final minute
+	Avg60sWindow int     // ticks in that average; well under 60 means missing ticks
+	Seq          int     // envelope seq, for gap detection
 }
