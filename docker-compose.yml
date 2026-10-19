@@ -1,0 +1,59 @@
+services:
+  kafka-kalshi:
+    image: apache/kafka:4.0.0
+    container_name: kafka-kalshi
+    ports:
+      - "9096:9096" # EXTERNAL listener, used by the Go producer on the host
+    environment:
+      # Single node running both roles in KRaft mode (Kafka 4.0 has no ZooKeeper)
+      # CLUSTER_ID is written into the data volume when storage is first formatted.
+      # Changing it later makes the broker refuse to start against the existing
+      # volume; generate a new one with: kafka-storage.sh random-uuid
+      CLUSTER_ID: lTvkvncDRF2PDWrMC7yVYg
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-kalshi:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      # INTERNAL is for other containers (kafka-ui), EXTERNAL is for the host.
+      # Clients connect to whatever address is advertised, so each side must use
+      # its own listener: localhost inside a container means that container.
+      KAFKA_LISTENERS: INTERNAL://:29092,EXTERNAL://:9096,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka-kalshi:29092,EXTERNAL://localhost:9096
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+
+      # Internal topics default to replication factor 3, which a single node can't satisfy
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+      # Topics are created explicitly so partition counts are a deliberate choice
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+
+      # Recorded data is the backtest dataset, so keep it until deleted by hand
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_LOG_RETENTION_HOURS: -1
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9096 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 15s
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "9000:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: kalshi-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-kalshi:29092
+    depends_on:
+      kafka-kalshi:
+        condition: service_healthy
+
+volumes:
+  kafka-data:

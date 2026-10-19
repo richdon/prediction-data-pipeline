@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"syscall"
@@ -15,8 +16,19 @@ import (
 
 func main() {
 	cfg := loadConfig("KXBTCD", "BRTI", "hourly")
+	if _, ok := cadenceRank[cfg.Cadence]; !ok {
+		log.Fatalf("unknown cadence %q: want hourly, daily or weekly", cfg.Cadence)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	w := newWriter(cfg)
+
+	defer func() {
+		if err := w.Close(); err != nil {
+			log.Println("kafka close: ", err)
+		}
+	}()
+
 	for {
 		connCtx, cancel := context.WithCancel(ctx)
 		sm, err := buildSubscriptionManager(connCtx, cfg)
@@ -47,9 +59,13 @@ func main() {
 				sm.conn.Close()
 				break inner
 			case t := <-ec.Tickers:
-				fmt.Printf("%s bid=%.2f ask=%.2f\n", t.MarketTicker, t.YesBid, t.YesAsk)
+				if err := publishTicker(ctx, w, t, cfg); err != nil {
+					log.Println("error publishing ticker data: ", err)
+				}
 			case it := <-ec.Index:
-				fmt.Printf("%s value=%.2f avg60s=%.2f (n=%d)\n", it.IndexID, it.Value, it.Avg60s, it.Avg60sWindow)
+				if err := publishIndex(ctx, w, it, cfg); err != nil {
+					log.Println("error publishing index tick: ", err)
+				}
 			case <-connCtx.Done():
 				log.Println("connection closed, exiting...")
 				return
@@ -90,27 +106,58 @@ func discoveryLoop(ctx context.Context, cfg Config, sm *SubscriptionManager) {
 	}
 }
 
-// marketTickers returns the market tickers of the first open event in
-// cfg.Series whose cadence matches cfg.Cadence.
-func marketTickers(ctx context.Context, cfg Config) (tickers []string, err error) {
+// cadenceRank orders cadences by window length. When a longer event settles at
+// the same time as a shorter one would, Kalshi lists only the longer event: no
+// hourly event exists for the hour ending 17:00 ET because the daily settles
+// then, and likewise for daily vs weekly on Fridays.
+var cadenceRank = map[string]int{"hourly": 1, "daily": 2, "weekly": 3}
+
+// marketTickers returns the active market tickers of the open event(s) in
+// cfg.Series that settle soonest at cfg.Cadence. Events of a longer cadence
+// also count, since they stand in for the configured cadence when their
+// settlement times coincide (see cadenceRank). Events sharing the earliest
+// strike date are all included. Events whose strike date has passed are
+// skipped, since a closed event can still be listed briefly before it settles.
+func marketTickers(ctx context.Context, cfg Config) ([]string, error) {
 	events, err := openEvents(ctx, cfg)
 	if err != nil {
-		return []string{}, err
+		return nil, err
 	}
+
+	minRank := cadenceRank[cfg.Cadence]
+	eligible := func(e Event) bool {
+		return cadenceRank[e.ProductMetadata.Cadence] >= minRank && e.StrikeDate.After(time.Now())
+	}
+
+	var next time.Time
 	for _, event := range events {
-		if event.ProductMetadata.Cadence == cfg.Cadence {
-			for _, market := range event.Markets {
-				if market.Status == "active" {
-					tickers = append(tickers, market.Ticker)
-				}
-			}
+		if eligible(event) && (next.IsZero() || event.StrikeDate.Before(next)) {
+			next = event.StrikeDate
 		}
 	}
-	if len(tickers) > 0 {
-		return tickers, nil
-
+	if next.IsZero() {
+		return nil, fmt.Errorf("no open %s event at %s cadence or longer with a future strike date", cfg.Series, cfg.Cadence)
 	}
-	return tickers, fmt.Errorf("selected cadence: %s did match any in series", cfg.Cadence)
+
+	var tickers []string
+	for _, event := range events {
+		if !eligible(event) || !event.StrikeDate.Equal(next) {
+			continue
+		}
+		n := 0
+		for _, market := range event.Markets {
+			if market.Status == "active" {
+				tickers = append(tickers, market.Ticker)
+				n++
+			}
+		}
+		log.Printf("selected event %s (%s, settles %s): %d active markets",
+			event.EventTicker, event.ProductMetadata.Cadence, event.StrikeDate.Local().Format("15:04 Jan 2"), n)
+	}
+	if len(tickers) == 0 {
+		return nil, fmt.Errorf("no active markets in %s events settling %s", cfg.Series, next.Local().Format("15:04 Jan 2"))
+	}
+	return tickers, nil
 }
 
 // nextTopOfHour returns the start of the hour after t.
@@ -135,6 +182,7 @@ func loadConfig(series, indexID, cadence string) Config {
 
 	apiKeyID := os.Getenv(env + "_API_KEY_ID")
 	privKeyPath := os.Getenv(env + "_PRIVATE_KEY_PATH")
+	brokers := strings.Split(os.Getenv("BROKERS"), ",")
 	return Config{
 		Env:            env,
 		ApiKeyID:       apiKeyID,
@@ -146,5 +194,8 @@ func loadConfig(series, indexID, cadence string) Config {
 		Series:         series,
 		IndexID:        indexID,
 		Cadence:        cadence,
+		Brokers:        brokers,
+		TopicTicker:    os.Getenv("TOPIC_TICKER"),
+		TopicIndex:     os.Getenv("TOPIC_INDEX"),
 	}
 }
